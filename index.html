@@ -788,6 +788,7 @@ body.light-mode #admin-settings label{color:#111418;font-weight:600}
   <div class="sub-tabs">
     <button class="sub-tab active" onclick="showSub('incharge','pending',this)">Pending Auth</button>
     <button class="sub-tab" onclick="showSub('incharge','ic-hist',this)">History</button>
+    <button class="sub-tab" onclick="showSub('incharge','ic-shifts',this);loadShiftSettingsUI()">Shift Management</button>
     <button class="sub-tab" onclick="showSub('incharge','ic-chpwd',this)">Change Password</button>
   </div>
   <div class="sp active" id="incharge-pending">
@@ -803,6 +804,68 @@ body.light-mode #admin-settings label{color:#111418;font-weight:600}
       </table></div>
     </div>
   </div>
+  <div class="sp" id="incharge-ic-shifts">
+    <div class="card" style="max-width:560px">
+      <div class="card-title">⏱ Shift Management</div>
+      <div style="font-size:11px;color:var(--text3);margin-bottom:14px">
+        Set the start and end time for each shift, and enable or disable shifts
+        individually — 1, 2, or 3 shifts can be active at once. Changes sync to every
+        connected device automatically and apply immediately to new verifications;
+        records already saved keep the shift name they were logged under and are
+        never altered. A shift ending earlier in the clock than it starts (like
+        22:00 → 06:00) is automatically treated as crossing midnight.
+      </div>
+
+      <div style="display:flex;flex-direction:column;gap:14px">
+        <div style="border:1px solid var(--border);border-radius:8px;padding:12px" id="shift1-block">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+            <div style="font-size:12px;font-weight:700;color:var(--text)">1st Shift</div>
+            <label style="display:flex;align-items:center;gap:6px;font-size:11px;color:var(--text2);cursor:pointer">
+              <input type="checkbox" id="shift1-enabled" checked onchange="onShiftEnabledToggle(1)"> Enabled
+            </label>
+          </div>
+          <div class="fg2">
+            <div class="fg"><label>Start Time</label><input type="time" id="shift1-start"></div>
+            <div class="fg"><label>End Time</label><input type="time" id="shift1-end"></div>
+          </div>
+        </div>
+        <div style="border:1px solid var(--border);border-radius:8px;padding:12px" id="shift2-block">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+            <div style="font-size:12px;font-weight:700;color:var(--text)">2nd Shift</div>
+            <label style="display:flex;align-items:center;gap:6px;font-size:11px;color:var(--text2);cursor:pointer">
+              <input type="checkbox" id="shift2-enabled" checked onchange="onShiftEnabledToggle(2)"> Enabled
+            </label>
+          </div>
+          <div class="fg2">
+            <div class="fg"><label>Start Time</label><input type="time" id="shift2-start"></div>
+            <div class="fg"><label>End Time</label><input type="time" id="shift2-end"></div>
+          </div>
+        </div>
+        <div style="border:1px solid var(--border);border-radius:8px;padding:12px" id="shift3-block">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+            <div style="font-size:12px;font-weight:700;color:var(--text)">3rd Shift</div>
+            <label style="display:flex;align-items:center;gap:6px;font-size:11px;color:var(--text2);cursor:pointer">
+              <input type="checkbox" id="shift3-enabled" checked onchange="onShiftEnabledToggle(3)"> Enabled
+            </label>
+          </div>
+          <div class="fg2">
+            <div class="fg"><label>Start Time</label><input type="time" id="shift3-start"></div>
+            <div class="fg"><label>End Time</label><input type="time" id="shift3-end"></div>
+          </div>
+        </div>
+      </div>
+
+      <div id="shift-settings-error" style="display:none;color:var(--red);font-size:12px;margin:10px 0;padding:6px 10px;background:rgba(248,81,73,.1);border-radius:4px"></div>
+      <div id="shift-settings-preview" style="font-size:11px;color:var(--text3);margin-top:10px"></div>
+
+      <div style="display:flex;gap:8px;align-items:center;margin-top:14px;flex-wrap:wrap">
+        <button class="btn bp" id="shift-save-btn" onclick="saveShiftSettings()">Save Changes</button>
+        <button class="btn bg-btn" onclick="resetShiftSettingsToDefault()">Reset to Default</button>
+        <span id="shift-settings-saved-msg" style="display:none;font-size:11px;color:var(--green);font-weight:600">✓ Saved</span>
+      </div>
+    </div>
+  </div>
+
   <div class="sp" id="incharge-ic-chpwd">
     <div class="card" style="max-width:380px">
       <div class="card-title">Change Password</div>
@@ -819,6 +882,7 @@ body.light-mode #admin-settings label{color:#111418;font-weight:600}
   <div class="sub-tabs">
     <button class="sub-tab active" onclick="showSub('quality','q-pending',this)">Pending Approval</button>
     <button class="sub-tab" onclick="showSub('quality','q-hist',this)">History</button>
+    <button class="sub-tab" onclick="openSharedShiftManagement()">⏱ Shift Management</button>
     <button class="sub-tab" onclick="showSub('quality','q-chpwd',this)">Change Password</button>
   </div>
   <div class="sp active" id="quality-q-pending">
@@ -1690,13 +1754,75 @@ const SETTINGS_KEY='spvs_settings';
 const SETTINGS_DEFAULTS={
   scanSpeedThreshold:80,faceMatchThreshold:0.5,earThreshold:0.22,
   livenessFrames:18,riskHighThreshold:60,riskMedThreshold:30,
-  noticeDuration:60,syncInterval:30
+  noticeDuration:60,syncInterval:30,
+  // Configurable shift timings. Each shift's start/end is "HH:MM" in 24h
+  // format, plus an "enabled" flag — 1, 2, or 3 shifts may be active at
+  // once, any combination. A shift where end < start (e.g. 22:00 -> 06:00)
+  // is treated as crossing midnight. These are DEFAULTS only — In-Charge,
+  // Quality, or Admin can change them anytime from Shift Management, and
+  // the change applies immediately to new transactions without touching
+  // anything already recorded. This is now backed by a real Supabase row
+  // (spvs_app_settings) so changes sync live to every connected device via
+  // Realtime — not just the device that made the change.
+  shifts:[
+    {name:'1st Shift', start:'06:00', end:'14:00', enabled:true},
+    {name:'2nd Shift', start:'14:00', end:'22:00', enabled:true},
+    {name:'3rd Shift', start:'22:00', end:'06:00', enabled:true}
+  ]
 };
 let SETTINGS=Object.assign({},SETTINGS_DEFAULTS);
 
 function loadSettings(){
   try{const s=localStorage.getItem(SETTINGS_KEY);if(s)SETTINGS=Object.assign({},SETTINGS_DEFAULTS,JSON.parse(s));}catch(e){}
+  sanitizeShiftSettings();
   applySettings();
+}
+
+// Guards against a corrupted/incomplete shifts array ever breaking shift
+// detection for every transaction going forward. Falls back to the default
+// 3-shift schedule if the stored value isn't a valid 3-entry array with
+// proper "HH:MM" times, without touching any other saved setting.
+function sanitizeShiftSettings(){
+  const isValidTime = t => typeof t==='string' && /^([01]\d|2[0-3]):[0-5]\d$/.test(t);
+  const valid = Array.isArray(SETTINGS.shifts)
+    && SETTINGS.shifts.length===3
+    && SETTINGS.shifts.every(s => s && typeof s.name==='string' && isValidTime(s.start) && isValidTime(s.end) && s.start!==s.end);
+  if(!valid){
+    SETTINGS.shifts = SETTINGS_DEFAULTS.shifts.map(s=>Object.assign({},s));
+  } else {
+    // Backfill 'enabled' for any shift missing it (e.g. data saved before
+    // this field existed) — default to enabled so nothing silently
+    // disappears from an older saved configuration.
+    SETTINGS.shifts = SETTINGS.shifts.map(s => ({...s, enabled: s.enabled !== false}));
+  }
+}
+
+// ══════════════════════════════════════════════════════
+//  SHIFT CONFIG — Supabase-backed for real-time cross-device sync
+// ══════════════════════════════════════════════════════
+const APP_SETTINGS_TABLE = 'spvs_app_settings';
+
+// Pulls the authoritative shift configuration from the database. Called on
+// startup (after DB connects) and again whenever a Realtime event reports
+// a change from another device — this is what makes shift changes appear
+// on every connected client without a manual refresh.
+async function loadShiftSettingsFromDB(){
+  if(!DB_READY) return;
+  try{
+    const result = await withTimeout(
+      _sb.from(APP_SETTINGS_TABLE).select('*').eq('setting_key','shifts').limit(1),
+      6000, null
+    );
+    if(result && !result.error && result.data && result.data.length){
+      const parsed = JSON.parse(result.data[0].setting_value);
+      if(Array.isArray(parsed) && parsed.length===3){
+        SETTINGS.shifts = parsed;
+        sanitizeShiftSettings();
+        try{ localStorage.setItem(SETTINGS_KEY, JSON.stringify(SETTINGS)); }catch(e){}
+        updateClock();
+      }
+    }
+  }catch(e){ console.warn('loadShiftSettingsFromDB:', e.message||e); }
 }
 function applySettings(){
   SCAN_SPEED_THRESHOLD=SETTINGS.scanSpeedThreshold||80;
@@ -1720,19 +1846,286 @@ function withTimeout(promise, ms, fallbackValue){
   ]);
 }
 
+// ══════════════════════════════════════════════════════
+//  VERIFIED DATABASE WRITE — single source of truth for CREATE/UPDATE/DELETE
+// ══════════════════════════════════════════════════════
+// Every important write in SPVS goes through this function. It NEVER
+// updates local application state or shows a success message until the
+// actual Supabase response confirms the write succeeded. If the database
+// operation fails, the caller is told so explicitly and local state is left
+// untouched — no false "saved successfully" message, no silent data loss.
+//
+// Returns {ok:true, data:[...]} on confirmed success,
+//      or {ok:false, error:"human readable reason"} on failure.
+async function verifiedDbWrite(table, op, payload, matchColumn, matchValue){
+  if(!DB_READY){
+    return {ok:false, error:'No database connection. Data was not saved.'};
+  }
+  try{
+    let query;
+    if(op==='insert'){
+      query = _sb.from(table).insert(payload).select();
+    } else if(op==='update'){
+      query = _sb.from(table).update(payload).eq(matchColumn, matchValue).select();
+    } else if(op==='delete'){
+      query = _sb.from(table).delete().eq(matchColumn, matchValue).select();
+    } else {
+      return {ok:false, error:'Unknown operation: '+op};
+    }
+    // Hard timeout so a stalled connection reports failure instead of
+    // hanging the save button forever (same reasoning as withTimeout usage
+    // elsewhere in the app).
+    const result = await withTimeout(query, 8000, null);
+    if(!result){
+      return {ok:false, error:'The request timed out. Please check your connection and try again.'};
+    }
+    if(result.error){
+      console.warn('verifiedDbWrite ['+table+']:', result.error.message||result.error);
+      return {ok:false, error:'Data could not be saved. Please check the connection and try again.'};
+    }
+    return {ok:true, data:result.data||[]};
+  }catch(e){
+    console.warn('verifiedDbWrite ['+table+']:', e.message||e);
+    return {ok:false, error:'Data could not be saved. Please check the connection and try again.'};
+  }
+}
+
+// Shows the standard failure message consistently, and optionally queues
+// the change for offline sync if that's appropriate for this data type
+// (transactions/audit already have their own queue; master-data edits are
+// NOT queued by default since a stale local edit silently reappearing later
+// could surprise the user — they're told plainly to retry instead).
+function showSaveFailure(customMsg){
+  showAlert('warn','⚠️','Save Failed', customMsg || 'Data could not be saved. Please check the connection and try again.');
+}
+
+
+// ══════════════════════════════════════════════════════
+//  SUPABASE REALTIME — live sync across every connected client
+// ══════════════════════════════════════════════════════
+// One multiplexed channel watches every shared table. Any INSERT/UPDATE/
+// DELETE made by ANY connected client (any device, browser, tab, or role)
+// is pushed to every other connected client automatically — no manual
+// refresh, no polling. Local application state (DB.*) is updated in place
+// and only the affected UI section is re-rendered; the page is never
+// reloaded for a realtime event.
+let REALTIME_CHANNEL = null;
+let REALTIME_STATUS = 'offline'; // 'live' | 'reconnecting' | 'offline'
+let REALTIME_RECONNECT_ATTEMPTS = 0;
+let REALTIME_RECONNECT_TIMER = null;
+
+// Generic, idempotent merge helpers — safe whether an incoming event is a
+// genuinely new change from another client, or an echo of a change THIS
+// client already applied optimistically after a verified write.
+function realtimeUpsertByKey(array, keyField, mappedRow){
+  if(!mappedRow || mappedRow[keyField]===undefined || mappedRow[keyField]===null) return;
+  const idx = array.findIndex(item => item[keyField] === mappedRow[keyField]);
+  if(idx >= 0) array[idx] = mappedRow;
+  else array.push(mappedRow);
+}
+function realtimeRemoveByKey(array, keyField, keyValue){
+  const idx = array.findIndex(item => item[keyField] === keyValue);
+  if(idx >= 0) array.splice(idx, 1);
+}
+
+function handleRealtimeEmployees(payload){
+  if(payload.eventType==='DELETE'){
+    realtimeRemoveByKey(DB.employees, 'id', payload.old?.id || payload.old?.emp_id);
+  } else {
+    realtimeUpsertByKey(DB.employees, 'id', mapEmp(payload.new));
+  }
+  try{ renderEmpTable(); }catch(e){}
+}
+function handleRealtimeParts(payload){
+  if(payload.eventType==='DELETE'){
+    realtimeRemoveByKey(DB.parts, 'num', payload.old?.num);
+  } else {
+    realtimeUpsertByKey(DB.parts, 'num', payload.new);
+  }
+  try{ renderPartTable(); }catch(e){}
+}
+function handleRealtimeWorkProcs(payload){
+  if(payload.eventType==='DELETE'){
+    realtimeRemoveByKey(DB.workProcs, 'barcode', payload.old?.barcode);
+  } else {
+    realtimeUpsertByKey(DB.workProcs, 'barcode', payload.new);
+  }
+  try{ renderWPTable(); }catch(e){}
+}
+function handleRealtimeColors(payload){
+  if(payload.eventType==='DELETE'){
+    realtimeRemoveByKey(DB.colors, 'name', payload.old?.name);
+  } else {
+    realtimeUpsertByKey(DB.colors, 'name', payload.new);
+  }
+  try{ renderColorTable(); populateColorSelect(); }catch(e){}
+}
+function handleRealtimeUsers(payload){
+  if(payload.eventType==='DELETE'){
+    realtimeRemoveByKey(DB.users, 'username', payload.old?.username);
+  } else {
+    realtimeUpsertByKey(DB.users, 'username', mapUser(payload.new));
+  }
+  try{ renderUserTable(); }catch(e){}
+}
+function handleRealtimeTransactions(payload){
+  if(payload.eventType==='INSERT'){
+    const mapped = mapTx(payload.new);
+    if(mapped.id===undefined || !DB.transactions.find(t=>t.id===mapped.id)){
+      DB.transactions.unshift(mapped);
+      if(DB.transactions.length>300) DB.transactions.length=300;
+    }
+    try{ renderRecentTx(); }catch(e){}
+    try{ if(document.getElementById('panel-admin')?.classList.contains('active')) renderDashboard(); }catch(e){}
+    try{ prodCountInitFromDB(); }catch(e){}
+  }
+  // Transactions are append-only in normal SPVS use — UPDATE/DELETE events
+  // aren't expected but are safely ignored rather than causing an error.
+}
+function handleRealtimeAudit(payload){
+  if(payload.eventType==='INSERT'){
+    const a = payload.new;
+    DB.auditLog.unshift({date:a.log_date,time:a.log_time,user:a.log_user,action:a.action,details:a.details});
+    if(DB.auditLog.length>500) DB.auditLog.length=500;
+    try{ if(document.getElementById('panel-admin')?.classList.contains('active')) renderAuditTrail(); }catch(e){}
+  }
+}
+function handleRealtimeInchargeHistory(payload){
+  if(payload.eventType==='INSERT') DB.inchargeHistory.unshift(payload.new);
+}
+function handleRealtimeQualityHistory(payload){
+  if(payload.eventType==='INSERT') DB.qualityHistory.unshift(payload.new);
+}
+function handleRealtimeOpState(payload){
+  // NG lockout state changed (possibly on another device) — if it's for
+  // the operator currently identified on THIS device, refresh the
+  // In-Charge/Quality pending-approval screens live.
+  const changedEmpId = payload.new?.emp_id || payload.old?.emp_id;
+  if(changedEmpId && OP.empId && changedEmpId===OP.empId){
+    reconcileOPStateWithDB().then(function(){
+      try{ if(document.getElementById('panel-incharge')?.classList.contains('active')) refreshInchargeData(); }catch(e){}
+      try{ if(document.getElementById('panel-quality')?.classList.contains('active')) refreshQualityData(); }catch(e){}
+    });
+  }
+}
+function handleRealtimeAppSettings(payload){
+  if(payload.new && payload.new.setting_key==='shifts'){
+    try{
+      const parsed = JSON.parse(payload.new.setting_value);
+      if(Array.isArray(parsed) && parsed.length===3){
+        SETTINGS.shifts = parsed;
+        sanitizeShiftSettings();
+        try{ localStorage.setItem(SETTINGS_KEY, JSON.stringify(SETTINGS)); }catch(e){}
+        updateClock();
+        // If the Shift Management screen happens to be open, refresh its
+        // fields live too, so an editor sees another user's change appear.
+        if(document.getElementById('incharge-ic-shifts')?.classList.contains('active')){
+          loadShiftSettingsUI();
+        }
+        showToast('⏱ Shift configuration updated by another user');
+      }
+    }catch(e){}
+  }
+}
+
+function initRealtimeSubscriptions(){
+  if(!DB_READY || !_sb) return;
+  if(REALTIME_CHANNEL){ try{ _sb.removeChannel(REALTIME_CHANNEL); }catch(e){} }
+  if(REALTIME_RECONNECT_TIMER){ clearTimeout(REALTIME_RECONNECT_TIMER); REALTIME_RECONNECT_TIMER=null; }
+
+  REALTIME_CHANNEL = _sb.channel('spvs-realtime-sync')
+    .on('postgres_changes', {event:'*', schema:'public', table:'spvs_employees'}, handleRealtimeEmployees)
+    .on('postgres_changes', {event:'*', schema:'public', table:'spvs_parts'}, handleRealtimeParts)
+    .on('postgres_changes', {event:'*', schema:'public', table:'spvs_workprocs'}, handleRealtimeWorkProcs)
+    .on('postgres_changes', {event:'*', schema:'public', table:'spvs_colors'}, handleRealtimeColors)
+    .on('postgres_changes', {event:'*', schema:'public', table:'spvs_users'}, handleRealtimeUsers)
+    .on('postgres_changes', {event:'*', schema:'public', table:'spvs_transactions'}, handleRealtimeTransactions)
+    .on('postgres_changes', {event:'*', schema:'public', table:'spvs_audit'}, handleRealtimeAudit)
+    .on('postgres_changes', {event:'*', schema:'public', table:'spvs_incharge_history'}, handleRealtimeInchargeHistory)
+    .on('postgres_changes', {event:'*', schema:'public', table:'spvs_quality_history'}, handleRealtimeQualityHistory)
+    .on('postgres_changes', {event:'*', schema:'public', table:'spvs_op_state'}, handleRealtimeOpState)
+    .on('postgres_changes', {event:'*', schema:'public', table:APP_SETTINGS_TABLE}, handleRealtimeAppSettings)
+    .subscribe(function(status){
+      if(status==='SUBSCRIBED'){
+        const wasDown = (REALTIME_STATUS !== 'live');
+        REALTIME_STATUS = 'live';
+        REALTIME_RECONNECT_ATTEMPTS = 0;
+        setDbStatus('live');
+        if(wasDown){
+          // Reconnected after being down — pull fresh authoritative state
+          // rather than trusting whatever accumulated locally while offline.
+          loadAllFromDB();
+        }
+      } else if(status==='CHANNEL_ERROR' || status==='TIMED_OUT'){
+        REALTIME_STATUS = 'reconnecting';
+        setDbStatus('reconnecting');
+        scheduleRealtimeReconnect();
+      } else if(status==='CLOSED'){
+        if(REALTIME_STATUS === 'live'){
+          REALTIME_STATUS = 'reconnecting';
+          setDbStatus('reconnecting');
+          scheduleRealtimeReconnect();
+        }
+      }
+    });
+}
+
+function scheduleRealtimeReconnect(){
+  if(REALTIME_RECONNECT_TIMER) return; // already scheduled
+  REALTIME_RECONNECT_ATTEMPTS++;
+  const delay = Math.min(30000, 2000 * REALTIME_RECONNECT_ATTEMPTS); // exponential-ish backoff, capped at 30s
+  REALTIME_RECONNECT_TIMER = setTimeout(function(){
+    REALTIME_RECONNECT_TIMER = null;
+    if(REALTIME_STATUS !== 'live' && navigator.onLine){
+      initRealtimeSubscriptions();
+    }
+  }, delay);
+}
+
+// Also attempt reconnection when the browser reports coming back online —
+// don't wait for the backoff timer if we already know connectivity returned.
+window.addEventListener('online', function(){
+  if(REALTIME_STATUS !== 'live') initRealtimeSubscriptions();
+});
+window.addEventListener('offline', function(){
+  REALTIME_STATUS = 'offline';
+  setDbStatus('offline');
+});
+
+
 async function initSupabase(){
   try{
     _sb=window.supabase.createClient(SUPA_URL,SUPA_KEY);
     await _sb.from('spvs_transactions').select('id').limit(1);
-    setDbStatus('ok');DB_READY=true;
+    DB_READY=true;
     await loadAllFromDB();
-  }catch(e){setDbStatus('err');console.warn('Supabase:',e);}
+    // Realtime subscriptions start only after the initial full load
+    // succeeds, so every client begins with a complete, correct baseline
+    // before live incremental updates start arriving on top of it.
+    initRealtimeSubscriptions();
+  }catch(e){setDbStatus('offline');console.warn('Supabase:',e);}
 }
+// Connection status now reflects the LIVE Realtime channel state, not just
+// the one-time initial connection check. Three states per spec:
+//   🟢 Live         — Realtime channels are actively subscribed
+//   🟡 Reconnecting — a channel dropped and is attempting to resubscribe
+//   🔴 Offline      — no connection at all
 function setDbStatus(s){
   const el=document.getElementById('db-status');
-  el.innerHTML=s==='ok'?'<span class="db-dot db-ok-dot"></span>DB Connected':s==='err'?'<span class="db-dot db-err-dot"></span>DB Offline':'<span class="db-dot db-loading-dot"></span>DB...';
-  el.style.background=s==='ok'?'rgba(46,160,67,.2)':s==='err'?'rgba(248,81,73,.2)':'rgba(88,166,255,.2)';
-  el.style.color=s==='ok'?'var(--green)':s==='err'?'var(--red)':'var(--blue)';
+  if(!el) return;
+  if(s==='live'){
+    el.innerHTML='<span class="db-dot db-ok-dot"></span>🟢 Live';
+    el.style.background='rgba(46,160,67,.2)'; el.style.color='var(--green)';
+  } else if(s==='reconnecting'){
+    el.innerHTML='<span class="db-dot db-loading-dot"></span>🟡 Reconnecting…';
+    el.style.background='rgba(210,153,34,.2)'; el.style.color='#d29922';
+  } else if(s==='err' || s==='offline'){
+    el.innerHTML='<span class="db-dot db-err-dot"></span>🔴 Offline';
+    el.style.background='rgba(248,81,73,.2)'; el.style.color='var(--red)';
+  } else {
+    el.innerHTML='<span class="db-dot db-loading-dot"></span>DB…';
+    el.style.background='rgba(88,166,255,.2)'; el.style.color='var(--blue)';
+  }
 }
 async function loadAllFromDB(){
   if(!DB_READY)return;
@@ -1763,10 +2156,15 @@ async function loadAllFromDB(){
     // Check the database for an unresolved NG lockout, in case the
     // operator's local browser data was cleared while a lockout was active.
     try{await reconcileOPStateWithDB();}catch(e){}
+    // Shift configuration is authoritative in the database — pull the
+    // latest saved values so a config change made on another device is
+    // reflected here immediately on load, not just on the device that
+    // made the change.
+    try{await loadShiftSettingsFromDB();}catch(e){}
   }catch(e){console.warn('LoadDB:',e);}
 }
 function mapTx(r){
-  return{date:r.tx_date,time:r.tx_time,shift:r.shift,empId:r.emp_id,opName:r.op_name,
+  return{id:r.id,date:r.tx_date,time:r.tx_time,shift:r.shift,empId:r.emp_id,opName:r.op_name,
     partNum:r.part_num,partDesc:r.part_desc,plBarcode:r.pl_barcode,axBarcode:r.ax_barcode,
     wpBarcode:r.wp_barcode,reqColor:r.req_color,entColor:r.ent_color,
     result:r.result,reason:r.reason,attempt:r.attempt,ngCount:r.ng_count||0,remarks:r.remarks||''};
@@ -1974,21 +2372,73 @@ async function clearOPStateFromDB(){
 // ══════════════════════════════════════════════════════
 //  CLOCK
 // ══════════════════════════════════════════════════════
-function getShift(h){
-  if(h>=6&&h<14)return '1st Shift';if(h>=14&&h<22)return '2nd Shift';return '3rd Shift';
+// Converts an "HH:MM" string to minutes-since-midnight for comparison.
+function timeStrToMinutes(t){
+  const parts = t.split(':');
+  return parseInt(parts[0],10)*60 + parseInt(parts[1],10);
 }
+
+// Determines the current shift by name, based on the LATEST saved shift
+// configuration in SETTINGS — never hard-coded. Correctly handles a shift
+// that crosses midnight (end time is numerically earlier than start time).
+// Boundary convention: the start time is INCLUSIVE, the end time is
+// EXCLUSIVE — e.g. for 06:00-14:00, 06:00 belongs to that shift and 14:00
+// already belongs to the next one. This matches the original fixed-shift
+// behavior exactly, just generalized to work with any configured times.
+// ══════════════════════════════════════════════════════
+//  getCurrentShift() — THE single central shift-detection function.
+//  Every area of SPVS that needs "what shift is it right now" calls this
+//  one function. Nothing else in the app hard-codes shift boundaries.
+// ══════════════════════════════════════════════════════
+// Respects each shift's enabled/disabled flag — 1, 2, or 3 shifts may be
+// active. Correctly handles a shift crossing midnight. If NO shift is
+// enabled, or the current time falls in a gap between enabled shifts,
+// returns 'Off-Shift' rather than guessing — this is deliberately visible
+// so a misconfiguration is obvious instead of silently mislabeling data.
+function getCurrentShiftByMinutes(nowMinutes){
+  const allShifts = (SETTINGS && Array.isArray(SETTINGS.shifts) && SETTINGS.shifts.length===3)
+    ? SETTINGS.shifts : SETTINGS_DEFAULTS.shifts;
+  const enabledShifts = allShifts.filter(s => s.enabled !== false);
+  if(!enabledShifts.length) return 'Off-Shift';
+
+  for(let i=0;i<enabledShifts.length;i++){
+    const s = enabledShifts[i];
+    const startMin = timeStrToMinutes(s.start);
+    const endMin = timeStrToMinutes(s.end);
+    if(startMin < endMin){
+      if(nowMinutes >= startMin && nowMinutes < endMin) return s.name;
+    } else {
+      // Crosses midnight — active if at/after start OR before end.
+      if(nowMinutes >= startMin || nowMinutes < endMin) return s.name;
+    }
+  }
+  return 'Off-Shift';
+}
+
+// THE central shift function — call this from anywhere in SPVS.
+// Accepts optional hour/minute for testing; defaults to right now.
+function getCurrentShift(h, m){
+  const now = new Date();
+  const hh = (typeof h==='number') ? h : now.getHours();
+  const mm = (typeof m==='number') ? m : now.getMinutes();
+  return getCurrentShiftByMinutes(hh*60+mm);
+}
+
+// Legacy name kept as an alias so nothing else in the file needs to change
+// — both names now route through the same single source of truth.
+function getShift(h, m){ return getCurrentShift(h, m); }
 function updateClock(){
   const now=new Date(),h=now.getHours(),m=now.getMinutes(),s=now.getSeconds();
   const pad=n=>String(n).padStart(2,'0');
   document.getElementById('top-clock').textContent=`${pad(h)}:${pad(m)}:${pad(s)}`;
-  const sh=getShift(h);
+  const sh=getShift(h,m);
   const sb=document.getElementById('shift-badge');
   sb.textContent=sh;sb.className='shift-badge '+(sh==='1st Shift'?'shift-1':sh==='2nd Shift'?'shift-2':'shift-3');
 }
 setInterval(updateClock,1000);updateClock();
 function nowStr(){
   const now=new Date();
-  return{d:now.toLocaleDateString('en-MY'),t:now.toLocaleTimeString('en-MY'),shift:getShift(now.getHours())};
+  return{d:now.toLocaleDateString('en-MY'),t:now.toLocaleTimeString('en-MY'),shift:getShift(now.getHours(),now.getMinutes())};
 }
 
 // ══════════════════════════════════════════════════════
@@ -2024,6 +2474,7 @@ function requirePermission(target){
   if(target==='admin') authorized = (role==='admin');
   else if(target==='incharge') authorized = (role==='admin'||role==='incharge');
   else if(target==='quality') authorized = (role==='admin'||role==='quality');
+  else if(target==='shift_mgmt') authorized = (role==='admin'||role==='incharge'||role==='quality');
   else if(target==='anyperm') authorized = (role==='admin'||perms.length>0);
   else authorized = (role==='admin'); // unknown target defaults to strictest check
 
@@ -2033,6 +2484,36 @@ function requirePermission(target){
     return false;
   }
   return true;
+}
+
+// Quality users are authorized for Shift Management (per shift_mgmt
+// permission) but should NOT see In-Charge's NG-approval tabs (Pending
+// Auth, History) — those remain In-Charge/Admin only. Rather than
+// duplicate the Shift Management screen's HTML (which would need duplicate
+// element IDs — not valid HTML), this navigates Quality users into the
+// shared screen while hiding the other In-Charge-only tabs and their
+// content for that visit.
+function openSharedShiftManagement(){
+  if(!requirePermission('shift_mgmt')) return;
+
+  document.querySelectorAll('.panel').forEach(p=>p.classList.remove('active'));
+  document.querySelectorAll('.nav-btn').forEach(b=>b.classList.remove('active'));
+  document.getElementById('panel-incharge').classList.add('active');
+
+  // If this visit is via Quality (not a real In-Charge/Admin session),
+  // hide the tabs/content that aren't relevant to Quality's role.
+  const isGenuineIncharge = (SESSION.role==='admin'||SESSION.role==='incharge');
+  const inchargeSubTabs = document.querySelectorAll('#panel-incharge .sub-tabs .sub-tab');
+  inchargeSubTabs.forEach(function(btn){
+    const isShiftTab = btn.textContent.indexOf('Shift Management')!==-1;
+    btn.style.display = (isGenuineIncharge || isShiftTab) ? '' : 'none';
+  });
+
+  document.querySelectorAll('#panel-incharge .sp').forEach(p=>p.classList.remove('active'));
+  document.getElementById('incharge-ic-shifts').classList.add('active');
+  document.querySelectorAll('#panel-incharge .sub-tab').forEach(b=>b.classList.remove('active'));
+
+  loadShiftSettingsUI();
 }
 
 function showPanel(id){
@@ -2390,8 +2871,12 @@ async function changePassword(role){
   if(nw!==cf){showAlert('warn','⚠️','Error','Passwords do not match.');return;}
 
   const newRecord = await createPasswordRecord(nw);
+  const result = await verifiedDbWrite('spvs_users','update',{pwd:newRecord},'username',SESSION.username);
+  if(!result.ok){
+    showSaveFailure(result.error);
+    return; // password NOT changed locally — user must retry, no false success
+  }
   user.pwd=newRecord;
-  if(DB_READY)_sb.from('spvs_users').update({pwd:newRecord}).eq('username',SESSION.username).then(()=>{});
   logAudit(SESSION.username,'Password Changed','Password updated');
   showAlert('success','✅','Success','Password changed successfully.');
 }
@@ -2797,9 +3282,24 @@ async function inlineIcAuthorize(){
   if(!reason){errEl.textContent='Please select a failure reason.';errEl.style.display='block';return;}
   if(!remarks){errEl.textContent='Remarks are required.';errEl.style.display='block';return;}
   const{d,t}=nowStr();
+  const icBtn=document.getElementById('lk-authorize-btn');
+  if(icBtn){ icBtn.disabled=true; icBtn.textContent='Recording…'; }
+
+  // This is a safety-critical audit record — the operator's screen is only
+  // unlocked AFTER the authorization is confirmed saved, so there's never a
+  // gap where re-verification proceeds without a persisted approval record.
+  const icWrite = await verifiedDbWrite('spvs_incharge_history','insert',{tx_date:d,tx_time:t,emp_id:OP.empId,op_name:OP.opName,part_num:OP.currentPart?.num||'–',reason,remarks,authorized_by:user.name,result:'Authorized'},null,null);
+
+  if(icBtn){ icBtn.disabled=false; icBtn.textContent='Authorize'; }
+
+  if(!icWrite.ok){
+    errEl.textContent = 'Could not record the authorization — please check the connection and try again.';
+    errEl.style.display='block';
+    return; // operator remains locked; nothing proceeds without a saved record
+  }
+
   const rec={date:d,time:t,empId:OP.empId,opName:OP.opName,partNum:OP.currentPart?.num||'–',reason,remarks,authorizedBy:user.name,result:'Authorized'};
   DB.inchargeHistory.unshift(rec);
-  if(DB_READY)_sb.from('spvs_incharge_history').insert({tx_date:d,tx_time:t,emp_id:OP.empId,op_name:OP.opName,part_num:OP.currentPart?.num||'–',reason,remarks,authorized_by:user.name,result:'Authorized'}).then(()=>{});
   logAudit(u,'2nd NG Authorization','Part: '+(OP.currentPart?.num||'–')+' | Reason: '+reason+' | By: '+user.name);
   // Also record in transactions so admin can see
   const icTx={date:d,time:t,shift:nowStr().shift,empId:OP.empId,opName:OP.opName,
@@ -2857,9 +3357,24 @@ async function inlineAdminApprove(){
   const user=candidate;
   if(!remarks){errEl.textContent='Approval remarks are required.';errEl.style.display='block';return;}
   const{d,t}=nowStr();
+  const qBtn=document.getElementById('qlk-approve-btn');
+  if(qBtn){ qBtn.disabled=true; qBtn.textContent='Recording…'; }
+
+  // Same principle as 2nd NG: the system only unlocks AFTER the approval
+  // record is confirmed saved — never a false "restarted" state with no
+  // persisted approval behind it.
+  const qWrite = await verifiedDbWrite('spvs_quality_history','insert',{tx_date:d,tx_time:t,emp_id:OP.empId,op_name:OP.opName,part_num:OP.currentPart?.num||'–',reason:'3rd NG',approved_by:user.name,remarks},null,null);
+
+  if(qBtn){ qBtn.disabled=false; qBtn.textContent='Approve Restart'; }
+
+  if(!qWrite.ok){
+    errEl.textContent = 'Could not record the approval — please check the connection and try again.';
+    errEl.style.display='block';
+    return; // system remains locked; nothing proceeds without a saved record
+  }
+
   const rec={date:d,time:t,empId:OP.empId,opName:OP.opName,partNum:OP.currentPart?.num||'–',reason:'3rd NG – Admin Restart',approvedBy:user.name,remarks};
   DB.qualityHistory.unshift(rec);
-  if(DB_READY)_sb.from('spvs_quality_history').insert({tx_date:d,tx_time:t,emp_id:OP.empId,op_name:OP.opName,part_num:OP.currentPart?.num||'–',reason:'3rd NG',approved_by:user.name,remarks}).then(()=>{});
   logAudit(u,'3rd NG Admin Restart Approval','Part: '+(OP.currentPart?.num||'–')+' | By: '+user.name+' | '+remarks.substring(0,60));
   document.getElementById('qlk').style.display='none';
   clearOPState();
@@ -3193,10 +3708,14 @@ function editEmployee(i){
   MODAL_EMP_FACE_DESCRIPTOR=e.faceDescriptor||null; updateEmpFaceStatusUI(MODAL_EMP_FACE_DESCRIPTOR);
   document.getElementById('modal-emp').classList.add('show');
 }
-function toggleEmpStatus(i){
-  DB.employees[i].status=DB.employees[i].status==='Active'?'Inactive':'Active';
-  if(DB_READY)_sb.from('spvs_employees').update({status:DB.employees[i].status}).eq('emp_id',DB.employees[i].id).then(()=>{});
-  logAudit(SESSION.username||'Admin','Employee Status',''+DB.employees[i].id+' → '+DB.employees[i].status);
+async function toggleEmpStatus(i){
+  if(!requirePermission('admin')) return;
+  const newStatus = DB.employees[i].status==='Active'?'Inactive':'Active';
+  const empId = DB.employees[i].id;
+  const result = await verifiedDbWrite('spvs_employees','update',{status:newStatus},'emp_id',empId);
+  if(!result.ok){ showSaveFailure(result.error); return; }
+  DB.employees[i].status=newStatus;
+  logAudit(SESSION.username||'Admin','Employee Status',empId+' → '+newStatus);
   renderEmpTable();
 }
 // ══════════════════════════════════════════════════════
@@ -3277,89 +3796,93 @@ async function enrollFaceForEmployee(){
   }
 }
 
-function saveEmployee(){
+async function saveEmployee(){
+  if(!requirePermission('admin')) return;
   const id=document.getElementById('emp-id').value.trim();
   const name=document.getElementById('emp-name').value.trim();
   if(!id||!name){showAlert('warn','⚠️','Required','Employee ID and Name are required.');return;}
   const idx=document.getElementById('emp-edit-id').value;
-  // Duplicate check
   const existing=DB.employees.findIndex(e=>e.id===id||(e.name.toLowerCase()===name.toLowerCase()&&e.dept===document.getElementById('emp-dept').value.trim()));
   if(idx===''&&existing>=0){showAlert('warn','⚠️','Duplicate','An employee with this ID or same name already exists.');return;}
   var _exEmpFd=(idx!==''&&DB.employees[parseInt(idx)])?DB.employees[parseInt(idx)].faceDescriptor:null;
   var _empFd=MODAL_EMP_FACE_DESCRIPTOR!==null?MODAL_EMP_FACE_DESCRIPTOR:_exEmpFd; MODAL_EMP_FACE_DESCRIPTOR=null;
   const obj={id,name,dept:document.getElementById('emp-dept').value.trim(),status:document.getElementById('emp-status').value,faceDescriptor:_empFd};
-  if(idx!==''){
+  const isNew = (idx==='');
+  const faceJson = obj.faceDescriptor ? JSON.stringify(obj.faceDescriptor) : null;
+
+  const saveBtn = document.querySelector('#modal-emp .btn.bp');
+  if(saveBtn){ saveBtn.disabled=true; saveBtn.textContent='Saving…'; }
+
+  let result;
+  if(!isNew){
+    result = await verifiedDbWrite('spvs_employees','update',{name:obj.name,dept:obj.dept,status:obj.status,face_descriptor:faceJson},'emp_id',id);
+  } else {
+    result = await verifiedDbWrite('spvs_employees','insert',{emp_id:id,name:obj.name,dept:obj.dept,status:obj.status,face_descriptor:faceJson},null,null);
+  }
+
+  if(saveBtn){ saveBtn.disabled=false; saveBtn.textContent='Save'; }
+
+  if(!result.ok){
+    showSaveFailure(result.error);
+    return; // local state untouched — no false success
+  }
+
+  if(!isNew){
     DB.employees[parseInt(idx)]=obj;
-    if(DB_READY)_sb.from('spvs_employees').update({name:obj.name,dept:obj.dept,status:obj.status,face_descriptor:obj.faceDescriptor?JSON.stringify(obj.faceDescriptor):null}).eq('emp_id',id).then(()=>{});
     logAudit(SESSION.username||'Admin','Edit Employee',id);
   }else{
     DB.employees.push(obj);
-    if(DB_READY)_sb.from('spvs_employees').insert({emp_id:id,name:obj.name,dept:obj.dept,status:obj.status,face_descriptor:obj.faceDescriptor?JSON.stringify(obj.faceDescriptor):null}).then(()=>{});
     logAudit(SESSION.username||'Admin','Add Employee',id);
   }
   closeModal('emp');renderEmpTable();
-  // Notify admin on new operator
-  if(idx==='') notifyNewOperator(name, id);
+  if(isNew) notifyNewOperator(name, id);
 }
+// Maps each master-data type to its table name, matching key column, local
+// array, matching field on the object, and render function — used so the
+// verified-delete logic below is written ONCE instead of five times.
+const DELETE_TYPE_CONFIG = {
+  emp:   {table:'spvs_employees', col:'emp_id',  array:()=>DB.employees, field:'id',      render:renderEmpTable,   label:'Employee'},
+  part:  {table:'spvs_parts',     col:'num',      array:()=>DB.parts,     field:'num',     render:renderPartTable,  label:'Part'},
+  color: {table:'spvs_colors',    col:'name',     array:()=>DB.colors,    field:'name',    render:function(){renderColorTable();populateColorSelect();}, label:'Color'},
+  wp:    {table:'spvs_workprocs', col:'barcode',  array:()=>DB.workProcs, field:'barcode', render:renderWPTable,    label:'Work Procedure'},
+  user:  {table:'spvs_users',     col:'username', array:()=>DB.users,     field:'username',render:renderUserTable,  label:'User'}
+};
+
 function deleteRecord(type,i,label){
+  const cfg = DELETE_TYPE_CONFIG[type];
+  if(!cfg){ showAlert('warn','⚠️','Error','Unknown record type.'); return; }
+
   const confirmEl=document.getElementById('delete-confirm');
   document.getElementById('delete-confirm-msg').innerHTML='Delete <strong>'+label+'</strong>?<br><span style="color:var(--red);font-size:11px">This cannot be undone.</span>';
-  // Capture the key value NOW to avoid stale index when confirm is clicked later
-  let keyVal='';
-  if(type==='emp')keyVal=DB.employees[i]?.id||'';
-  else if(type==='part')keyVal=DB.parts[i]?.num||'';
-  else if(type==='color')keyVal=DB.colors[i]?.name||'';
-  else if(type==='wp')keyVal=DB.workProcs[i]?.barcode||'';
-  else if(type==='user')keyVal=DB.users[i]?.username||'';
+
+  const keyVal = cfg.array()[i]?.[cfg.field] || '';
   if(!keyVal){showAlert('warn','⚠️','Error','Cannot find record to delete.');return;}
 
-  // Remove old handler and set new one
   const btn=document.getElementById('delete-confirm-yes');
   btn.replaceWith(btn.cloneNode(true)); // remove all old listeners
-  document.getElementById('delete-confirm-yes').onclick=()=>{
+  document.getElementById('delete-confirm-yes').onclick=async ()=>{
     confirmEl.classList.remove('show');
-    if(type==='emp'){
-      const idx=DB.employees.findIndex(e=>e.id===keyVal);
-      if(idx<0){showAlert('warn','⚠️','Not Found','Record already removed.');return;}
-      DB.employees.splice(idx,1);
-      renderEmpTable();
-      logAudit(SESSION.username||'Admin','Delete emp',keyVal);
-      showAlert('success','✅','Deleted','Employee record deleted successfully.');
-      if(DB_READY){(async()=>{try{await _sb.from('spvs_employees').delete().eq('emp_id',keyVal);}catch(e){console.error('DB Delete [spvs_employees]:',e.message||String(e));}})();}
-    }else if(type==='part'){
-      const idx=DB.parts.findIndex(p=>p.num===keyVal);
-      if(idx<0){showAlert('warn','⚠️','Not Found','Record already removed.');return;}
-      DB.parts.splice(idx,1);
-      renderPartTable();
-      logAudit(SESSION.username||'Admin','Delete part',keyVal);
-      showAlert('success','✅','Deleted','Part record deleted successfully.');
-      if(DB_READY){(async()=>{try{await _sb.from('spvs_parts').delete().eq('num',keyVal);}catch(e){console.error('DB Delete [spvs_parts]:',e.message||String(e));}})();}
-    }else if(type==='color'){
-      const idx=DB.colors.findIndex(c=>c.name===keyVal);
-      if(idx<0){showAlert('warn','⚠️','Not Found','Record already removed.');return;}
-      DB.colors.splice(idx,1);
-      renderColorTable();populateColorSelect();
-      logAudit(SESSION.username||'Admin','Delete color',keyVal);
-      showAlert('success','✅','Deleted','Color record deleted successfully.');
-      if(DB_READY){(async()=>{try{await _sb.from('spvs_colors').delete().eq('name',keyVal);}catch(e){console.error('DB Delete [spvs_colors]:',e.message||String(e));}})();}
-    }else if(type==='wp'){
-      const idx=DB.workProcs.findIndex(w=>w.barcode===keyVal);
-      if(idx<0){showAlert('warn','⚠️','Not Found','Record already removed.');return;}
-      DB.workProcs.splice(idx,1);
-      renderWPTable();
-      logAudit(SESSION.username||'Admin','Delete wp',keyVal);
-      showAlert('success','✅','Deleted','Work Procedure record deleted successfully.');
-      if(DB_READY){(async()=>{try{await _sb.from('spvs_workprocs').delete().eq('barcode',keyVal);}catch(e){console.error('DB Delete [spvs_workprocs]:',e.message||String(e));}})();}
-    }else if(type==='user'){
-      const idx=DB.users.findIndex(u=>u.username===keyVal);
-      if(idx<0){showAlert('warn','⚠️','Not Found','Record already removed.');return;}
-      DB.users.splice(idx,1);
-      renderUserTable();
-      logAudit(SESSION.username||'Admin','Delete user',keyVal);
-      showAlert('success','✅','Deleted','User record deleted successfully.');
-      if(DB_READY){(async()=>{try{await _sb.from('spvs_users').delete().eq('username',keyVal);}catch(e){console.error('DB Delete [spvs_users]:',e.message||String(e));}})();}
+
+    const array = cfg.array();
+    const idx = array.findIndex(item => item[cfg.field] === keyVal);
+    if(idx<0){showAlert('warn','⚠️','Not Found','Record already removed.');return;}
+
+    if(!requirePermission('admin')) return;
+
+    // VERIFIED DELETE: the database confirms the row is gone BEFORE local
+    // state changes or any success message appears. If the delete fails
+    // (network issue, permission issue, etc.), the record stays visible
+    // exactly as it was — no false "deleted successfully" message.
+    const result = await verifiedDbWrite(cfg.table, 'delete', null, cfg.col, keyVal);
+    if(!result.ok){
+      showSaveFailure(result.error);
+      return;
     }
 
+    array.splice(idx,1);
+    cfg.render();
+    logAudit(SESSION.username||'Admin','Delete '+type,keyVal);
+    showAlert('success','✅','Deleted',cfg.label+' record deleted successfully.');
   };
   confirmEl.classList.add('show');
 }
@@ -3399,11 +3922,17 @@ function editPart(i){
   document.getElementById('modal-part-title').textContent='Edit Part – '+p.num;
   document.getElementById('modal-part').classList.add('show');
 }
-function togglePartStatus(i){
-  DB.parts[i].status=DB.parts[i].status==='Active'?'Inactive':'Active';
-  renderPartTable();logAudit(SESSION.username,'Part Status',DB.parts[i].num+' → '+DB.parts[i].status);
+async function togglePartStatus(i){
+  if(!requirePermission('admin')) return;
+  const newStatus = DB.parts[i].status==='Active'?'Inactive':'Active';
+  const num = DB.parts[i].num;
+  const result = await verifiedDbWrite('spvs_parts','update',{status:newStatus},'num',num);
+  if(!result.ok){ showSaveFailure(result.error); return; }
+  DB.parts[i].status=newStatus;
+  renderPartTable();logAudit(SESSION.username,'Part Status',num+' → '+newStatus);
 }
-function savePart(){
+async function savePart(){
+  if(!requirePermission('admin')) return;
   const num=document.getElementById('part-num').value.trim();
   const desc=document.getElementById('part-desc').value.trim();
   const pl=document.getElementById('part-pl').value.trim();
@@ -3411,21 +3940,37 @@ function savePart(){
   const wp=document.getElementById('part-wp-ref').value;
   if(!num||!desc||!pl||!ax||!wp){showAlert('warn','⚠️','Required','All fields except status are required.');return;}
   const idx=document.getElementById('part-edit-idx').value;
-  // Duplicate check
-  if(idx===''){
+  const isNew = (idx==='');
+  if(isNew){
     if(DB.parts.find(p=>p.num===num)){showAlert('warn','⚠️','Duplicate','Part Number '+num+' already exists.');return;}
     if(DB.parts.find(p=>p.desc.toLowerCase()===desc.toLowerCase())){showAlert('warn','⚠️','Duplicate','Part Description "'+desc+'" already exists.');return;}
     if(DB.parts.find(p=>p.pl===pl)){showAlert('warn','⚠️','Duplicate','PL Barcode '+pl+' already used by another part.');return;}
     if(DB.parts.find(p=>p.ax===ax)){showAlert('warn','⚠️','Duplicate','AX Barcode '+ax+' already used by another part.');return;}
   }
   const obj={num,desc,color:document.getElementById('part-color').value,pl,ax,wp,status:document.getElementById('part-status').value};
-  if(idx!==''){
+
+  const saveBtn = document.querySelector('#modal-part .btn.bp');
+  if(saveBtn){ saveBtn.disabled=true; saveBtn.textContent='Saving…'; }
+
+  let result;
+  if(!isNew){
+    result = await verifiedDbWrite('spvs_parts','update',{desc:obj.desc,color:obj.color,pl:obj.pl,ax:obj.ax,wp:obj.wp,status:obj.status},'num',num);
+  } else {
+    result = await verifiedDbWrite('spvs_parts','insert',{num,desc:obj.desc,color:obj.color,pl:obj.pl,ax:obj.ax,wp:obj.wp,status:obj.status},null,null);
+  }
+
+  if(saveBtn){ saveBtn.disabled=false; saveBtn.textContent='Save'; }
+
+  if(!result.ok){
+    showSaveFailure(result.error);
+    return;
+  }
+
+  if(!isNew){
     DB.parts[parseInt(idx)]=obj;
-    if(DB_READY)_sb.from('spvs_parts').update({desc:obj.desc,color:obj.color,pl:obj.pl,ax:obj.ax,wp:obj.wp,status:obj.status}).eq('num',num).then(()=>{});
     logAudit(SESSION.username,'Edit Part',num);
   }else{
     DB.parts.push(obj);
-    if(DB_READY)_sb.from('spvs_parts').insert({num,desc:obj.desc,color:obj.color,pl:obj.pl,ax:obj.ax,wp:obj.wp,status:obj.status}).then(()=>{});
     logAudit(SESSION.username,'Add Part',num);
   }
   closeModal('part');renderPartTable();
@@ -3457,11 +4002,17 @@ function editWP(i){
   document.getElementById('modal-wp-title').textContent='Edit Work Procedure – '+w.barcode;
   document.getElementById('modal-wp').classList.add('show');
 }
-function toggleWPStatus(i){
-  DB.workProcs[i].status=DB.workProcs[i].status==='Active'?'Inactive':'Active';
-  renderWPTable();logAudit(SESSION.username,'WP Status',DB.workProcs[i].num+' → '+DB.workProcs[i].status);
+async function toggleWPStatus(i){
+  if(!requirePermission('admin')) return;
+  const newStatus = DB.workProcs[i].status==='Active'?'Inactive':'Active';
+  const barcode = DB.workProcs[i].barcode;
+  const result = await verifiedDbWrite('spvs_workprocs','update',{status:newStatus},'barcode',barcode);
+  if(!result.ok){ showSaveFailure(result.error); return; }
+  DB.workProcs[i].status=newStatus;
+  renderWPTable();logAudit(SESSION.username,'WP Status',barcode+' → '+newStatus);
 }
-function saveWP(){
+async function saveWP(){
+  if(!requirePermission('admin')) return;
   const barcode=document.getElementById('wp-barcode').value.trim();
   if(!barcode){showAlert('warn','⚠️','Required','WP Barcode is required.');return;}
   const idx=document.getElementById('wp-edit-idx').value;
@@ -3470,13 +4021,29 @@ function saveWP(){
     if(DB.workProcs.find(w=>w.barcode===barcode)){showAlert('warn','⚠️','Duplicate','WP Barcode "'+barcode+'" already exists.');return;}
   }
   const obj={barcode,desc:document.getElementById('wp-desc').value.trim(),status:document.getElementById('wp-status').value};
+
+  const saveBtn = document.querySelector('#modal-wp .btn.bp');
+  if(saveBtn){ saveBtn.disabled=true; saveBtn.textContent='Saving…'; }
+
+  let result;
+  if(!isNew){
+    result = await verifiedDbWrite('spvs_workprocs','update',{desc:obj.desc,status:obj.status},'barcode',barcode);
+  } else {
+    result = await verifiedDbWrite('spvs_workprocs','insert',{barcode:obj.barcode,desc:obj.desc,status:obj.status},null,null);
+  }
+
+  if(saveBtn){ saveBtn.disabled=false; saveBtn.textContent='Save'; }
+
+  if(!result.ok){
+    showSaveFailure(result.error);
+    return;
+  }
+
   if(!isNew){
     DB.workProcs[parseInt(idx)]=obj;
-    if(DB_READY)_sb.from('spvs_workprocs').update({desc:obj.desc,status:obj.status}).eq('barcode',barcode).then(()=>{});
     logAudit(SESSION.username,'Edit WP',barcode);
   }else{
     DB.workProcs.push(obj);
-    if(DB_READY)_sb.from('spvs_workprocs').insert({barcode:obj.barcode,desc:obj.desc,status:obj.status}).then(()=>{});
     logAudit(SESSION.username,'Add WP',barcode);
   }
   closeModal('wp');renderWPTable();
@@ -3509,9 +4076,14 @@ function editColor(i){
   document.getElementById('modal-color-title').textContent='Edit Color – '+c.name;
   document.getElementById('modal-color').classList.add('show');
 }
-function toggleColorStatus(i){
-  DB.colors[i].status=DB.colors[i].status==='Active'?'Inactive':'Active';
-  renderColorTable();populateColorSelect();logAudit(SESSION.username,'Color Status',DB.colors[i].name+' → '+DB.colors[i].status);
+async function toggleColorStatus(i){
+  if(!requirePermission('admin')) return;
+  const newStatus = DB.colors[i].status==='Active'?'Inactive':'Active';
+  const name = DB.colors[i].name;
+  const result = await verifiedDbWrite('spvs_colors','update',{status:newStatus},'name',name);
+  if(!result.ok){ showSaveFailure(result.error); return; }
+  DB.colors[i].status=newStatus;
+  renderColorTable();populateColorSelect();logAudit(SESSION.username,'Color Status',name+' → '+newStatus);
 }
 // ══════════════════════════════════════════════════════
 //  COLOR MASTER — auto-suggest accurate hex for known color names
@@ -3549,21 +4121,39 @@ function autoSuggestColorHex(typedName){
   if(previewDot) previewDot.innerHTML = colorDotSVG(hexInput.value, 24);
 }
 
-function saveColor(){
+async function saveColor(){
+  if(!requirePermission('admin')) return;
   const name=document.getElementById('color-name-inp').value.trim();
   if(!name){showAlert('warn','⚠️','Required','Color name is required.');return;}
   const idx=document.getElementById('color-edit-idx').value;
-  if(idx===''){
+  const isNew = (idx==='');
+  if(isNew){
     if(DB.colors.find(c=>c.name.toLowerCase()===name.toLowerCase())){showAlert('warn','⚠️','Duplicate','Color "'+name+'" already exists.');return;}
   }
   const obj={name,hex:document.getElementById('color-hex').value,status:document.getElementById('color-status').value};
-  if(idx!==''){
+
+  const saveBtn = document.querySelector('#modal-color .btn.bp');
+  if(saveBtn){ saveBtn.disabled=true; saveBtn.textContent='Saving…'; }
+
+  let result;
+  if(!isNew){
+    result = await verifiedDbWrite('spvs_colors','update',{hex:obj.hex,status:obj.status},'name',name);
+  } else {
+    result = await verifiedDbWrite('spvs_colors','insert',{name,hex:obj.hex,status:obj.status},null,null);
+  }
+
+  if(saveBtn){ saveBtn.disabled=false; saveBtn.textContent='Save'; }
+
+  if(!result.ok){
+    showSaveFailure(result.error);
+    return;
+  }
+
+  if(!isNew){
     DB.colors[parseInt(idx)]=obj;
-    if(DB_READY)_sb.from('spvs_colors').update({hex:obj.hex,status:obj.status}).eq('name',name).then(()=>{});
     logAudit(SESSION.username,'Edit Color',name);
   }else{
     DB.colors.push(obj);
-    if(DB_READY)_sb.from('spvs_colors').insert({name,hex:obj.hex,status:obj.status}).then(()=>{});
     logAudit(SESSION.username,'Add Color',name);
   }
   closeModal('color');renderColorTable();populateColorSelect();
@@ -3874,23 +4464,49 @@ async function saveUser(){
   const obj={empid:document.getElementById('user-empid').value.trim(),name,username:uname,dept:document.getElementById('user-dept').value.trim(),
     role:document.getElementById('user-role').value,status:document.getElementById('user-status').value,faceDescriptor:fd,
     pwd:pwdRecord,perms};
+
+  const saveBtn = document.querySelector('#modal-user .btn.bp');
+  if(saveBtn){ saveBtn.disabled=true; saveBtn.textContent='Saving…'; }
+
+  let result;
+  if(idx!==''){
+    const updatePayload={name:obj.name,dept:obj.dept,role:obj.role,status:obj.status,perms:JSON.stringify(perms)};
+    if(pwdChanged) updatePayload.pwd = pwdRecord;
+    result = await verifiedDbWrite('spvs_users','update',updatePayload,'username',uname);
+  }else{
+    result = await verifiedDbWrite('spvs_users','insert',{empid:obj.empid,name:obj.name,username:uname,dept:obj.dept,role:obj.role,status:obj.status,pwd:obj.pwd,perms:JSON.stringify(perms)},null,null);
+  }
+
+  if(saveBtn){ saveBtn.disabled=false; saveBtn.textContent='Save User'; }
+
+  if(!result.ok){
+    showSaveFailure(result.error);
+    return; // local state untouched, password never left unhashed anywhere
+  }
+
   if(idx!==''){
     DB.users[parseInt(idx)]=obj;
-    const updatePayload={name:obj.name,dept:obj.dept,role:obj.role,status:obj.status,perms:JSON.stringify(perms)};
-    if(pwdChanged) updatePayload.pwd = pwdRecord; // only touch the pwd column if it actually changed
-    if(DB_READY)_sb.from('spvs_users').update(updatePayload).eq('username',uname).then(()=>{});
     logAudit(SESSION.username,'Edit User',uname+' perms: '+perms.join(',')+(pwdChanged?' | password changed':''));
   }else{
     DB.users.push(obj);
-    if(DB_READY)_sb.from('spvs_users').insert({empid:obj.empid,name:obj.name,username:uname,dept:obj.dept,role:obj.role,status:obj.status,pwd:obj.pwd,perms:JSON.stringify(perms)}).then(()=>{});
     logAudit(SESSION.username,'Create User',uname+' role: '+obj.role);
   }
   closeModal('user');renderUserTable();
 }
-function toggleUserStatus(i){
+async function toggleUserStatus(i){
+  if(!requirePermission('admin')) return;
   if(DB.users[i].role==='admin'){showAlert('warn','⚠️','Protected','Admin accounts cannot be disabled.');return;}
-  DB.users[i].status=DB.users[i].status==='active'?'inactive':'active';
-  logAudit(SESSION.username,'User Status',DB.users[i].username+' → '+DB.users[i].status);
+  const newStatus = DB.users[i].status==='active'?'inactive':'active';
+  const username = DB.users[i].username;
+
+  const result = await verifiedDbWrite('spvs_users','update',{status:newStatus},'username',username);
+  if(!result.ok){
+    showSaveFailure(result.error);
+    return;
+  }
+
+  DB.users[i].status=newStatus;
+  logAudit(SESSION.username,'User Status',username+' → '+newStatus);
   renderUserTable();
 }
 async function resetUserPwd(i){
@@ -3905,10 +4521,15 @@ async function resetUserPwd(i){
   for(let k=0;k<12;k++){ tmp += chars[randomBytes[k]%chars.length]; }
 
   const record = await createPasswordRecord(tmp);
+  const username = DB.users[i].username;
+  const result = await verifiedDbWrite('spvs_users','update',{pwd:record},'username',username);
+  if(!result.ok){
+    showSaveFailure(result.error);
+    return; // temp password NOT applied — don't tell the admin a password that isn't actually active
+  }
   DB.users[i].pwd=record;
-  logAudit(SESSION.username,'Password Reset',DB.users[i].username);
-  if(DB_READY)_sb.from('spvs_users').update({pwd:record}).eq('username',DB.users[i].username).then(()=>{});
-  showAlert('warn','🔑','Temp Password','Temp password for '+DB.users[i].username+':\n\n'+tmp+'\n\nShare this securely. This is shown only once and is not stored anywhere — the user should change it after logging in.');
+  logAudit(SESSION.username,'Password Reset',username);
+  showAlert('warn','🔑','Temp Password','Temp password for '+username+':\n\n'+tmp+'\n\nShare this securely. This is shown only once and is not stored anywhere — the user should change it after logging in.');
 }
 
 // ══════════════════════════════════════════════════════
@@ -5949,8 +6570,13 @@ async function enrollFace(userIdx){
       const det=await faceapi.detectSingleFace(video,new faceapi.TinyFaceDetectorOptions({inputSize:320})).withFaceLandmarks(true).withFaceDescriptor();
       stream.getTracks().forEach(t=>t.stop());
       if(!det){showAlert('warn','⚠️','No Face','No face detected. Please try again in good lighting.');return;}
+      const faceJson = JSON.stringify(Array.from(det.descriptor));
+      const faceResult = await verifiedDbWrite('spvs_users','update',{face_descriptor:faceJson},'username',user.username);
+      if(!faceResult.ok){
+        showSaveFailure(faceResult.error);
+        return; // face profile NOT saved — don't tell the admin it's active when it isn't
+      }
       DB.users[userIdx].faceDescriptor=Array.from(det.descriptor);
-      if(DB_READY)_sb.from('spvs_users').update({face_descriptor:JSON.stringify(Array.from(det.descriptor))}).eq('username',user.username).then(()=>{});
       logAudit(SESSION.username||'Admin','Face Enroll','Enrolled face for '+user.username);
       showAlert('success','✅','Face Enrolled','Face profile saved for '+user.name+'. They can now log in with Face Recognition.');
       renderUserTable();
@@ -6171,6 +6797,165 @@ async function confirmPartImport(){
 // ══════════════════════════════════════════════════════
 //  SETTINGS PANEL — load, save, reset
 // ══════════════════════════════════════════════════════
+
+// ══════════════════════════════════════════════════════
+//  SHIFT MANAGEMENT (In-Charge)
+// ══════════════════════════════════════════════════════
+function loadShiftSettingsUI(){
+  sanitizeShiftSettings();
+  const shifts = SETTINGS.shifts;
+  for(let i=0;i<3;i++){
+    const n = i+1;
+    document.getElementById('shift'+n+'-start').value = shifts[i].start;
+    document.getElementById('shift'+n+'-end').value = shifts[i].end;
+    document.getElementById('shift'+n+'-enabled').checked = shifts[i].enabled !== false;
+    applyShiftEnabledUI(n);
+  }
+  document.getElementById('shift-settings-error').style.display = 'none';
+  document.getElementById('shift-settings-saved-msg').style.display = 'none';
+  updateShiftSettingsPreview();
+}
+
+// Visually dims a shift's time fields when disabled, and disables the
+// inputs so it's obvious at a glance which shifts are actually active.
+function applyShiftEnabledUI(n){
+  const enabled = document.getElementById('shift'+n+'-enabled').checked;
+  const block = document.getElementById('shift'+n+'-block');
+  const startEl = document.getElementById('shift'+n+'-start');
+  const endEl = document.getElementById('shift'+n+'-end');
+  if(block) block.style.opacity = enabled ? '1' : '0.5';
+  if(startEl) startEl.disabled = !enabled;
+  if(endEl) endEl.disabled = !enabled;
+}
+function onShiftEnabledToggle(n){
+  applyShiftEnabledUI(n);
+  updateShiftSettingsPreview();
+}
+
+// Shows a live "which shift is it right now, under these settings" preview
+// as the In-Charge edits the fields — before they even click Save — so
+// they can sanity-check the configuration visually.
+function updateShiftSettingsPreview(){
+  const previewEl = document.getElementById('shift-settings-preview');
+  if(!previewEl) return;
+  try{
+    const draftShifts = [
+      {name:'1st Shift', start:document.getElementById('shift1-start').value, end:document.getElementById('shift1-end').value, enabled:document.getElementById('shift1-enabled').checked},
+      {name:'2nd Shift', start:document.getElementById('shift2-start').value, end:document.getElementById('shift2-end').value, enabled:document.getElementById('shift2-enabled').checked},
+      {name:'3rd Shift', start:document.getElementById('shift3-start').value, end:document.getElementById('shift3-end').value, enabled:document.getElementById('shift3-enabled').checked}
+    ];
+    const enabledDrafts = draftShifts.filter(s=>s.enabled);
+    if(!enabledDrafts.length){ previewEl.textContent='With these settings, right now would be: Off-Shift (no shifts enabled)'; return; }
+    if(enabledDrafts.some(s=>!s.start||!s.end)){ previewEl.textContent=''; return; }
+    const now = new Date();
+    const nowMinutes = now.getHours()*60+now.getMinutes();
+    let current = 'Off-Shift';
+    for(const s of enabledDrafts){
+      const sm = timeStrToMinutes(s.start), em = timeStrToMinutes(s.end);
+      const active = sm<em ? (nowMinutes>=sm && nowMinutes<em) : (nowMinutes>=sm || nowMinutes<em);
+      if(active){ current = s.name; break; }
+    }
+    previewEl.textContent = 'With these settings, right now ('+now.toTimeString().slice(0,5)+') would be: '+current;
+  }catch(e){ previewEl.textContent=''; }
+}
+['shift1-start','shift1-end','shift2-start','shift2-end','shift3-start','shift3-end'].forEach(function(id){
+  document.addEventListener('DOMContentLoaded', function(){
+    const el = document.getElementById(id);
+    if(el) el.addEventListener('input', updateShiftSettingsPreview);
+  });
+});
+
+async function saveShiftSettings(){
+  if(!requirePermission('shift_mgmt')) return;
+  const errEl = document.getElementById('shift-settings-error');
+  errEl.style.display = 'none';
+
+  const draft = [
+    {name:'1st Shift', start:document.getElementById('shift1-start').value, end:document.getElementById('shift1-end').value, enabled:document.getElementById('shift1-enabled').checked},
+    {name:'2nd Shift', start:document.getElementById('shift2-start').value, end:document.getElementById('shift2-end').value, enabled:document.getElementById('shift2-enabled').checked},
+    {name:'3rd Shift', start:document.getElementById('shift3-start').value, end:document.getElementById('shift3-end').value, enabled:document.getElementById('shift3-enabled').checked}
+  ];
+
+  // Only ENABLED shifts need valid, non-identical times — a disabled
+  // shift's fields can be left as-is without blocking Save, since it's not
+  // in use. At least one shift must be enabled overall isn't required
+  // either (an all-disabled state just means "Off-Shift" everywhere,
+  // which is a valid, honestly-labeled state rather than an error).
+  for(const s of draft){
+    if(!s.enabled) continue;
+    if(!s.start || !s.end){
+      errEl.textContent = s.name+': start and end time are required while enabled.';
+      errEl.style.display = 'block';
+      return;
+    }
+    if(s.start === s.end){
+      errEl.textContent = s.name+': start and end time cannot be the same.';
+      errEl.style.display = 'block';
+      return;
+    }
+  }
+
+  const saveBtn = document.getElementById('shift-save-btn');
+  if(saveBtn){ saveBtn.disabled=true; saveBtn.textContent='Saving…'; }
+
+  // Verified write: only update local SETTINGS/localStorage/UI after the
+  // database confirms the save. Uses upsert since the settings row may not
+  // exist yet on a brand-new deployment.
+  const payload = {setting_key:'shifts', setting_value:JSON.stringify(draft), updated_at:new Date().toISOString()};
+  let writeResult;
+  if(DB_READY){
+    writeResult = await withTimeout(
+      _sb.from(APP_SETTINGS_TABLE).upsert(payload, {onConflict:'setting_key'}).select(),
+      8000, null
+    );
+  }
+
+  if(saveBtn){ saveBtn.disabled=false; saveBtn.textContent='Save Changes'; }
+
+  if(DB_READY && (!writeResult || writeResult.error)){
+    showSaveFailure();
+    return;
+  }
+
+  SETTINGS.shifts = draft;
+  try{ localStorage.setItem(SETTINGS_KEY, JSON.stringify(SETTINGS)); }catch(e){}
+
+  const summary = draft.map(s=>s.name+': '+(s.enabled?(s.start+'-'+s.end):'disabled')).join(' | ');
+  logAudit(SESSION?.username||'User','Shift Timings Changed',summary);
+
+  updateClock(); // refresh the shift badge immediately with the new config
+  updateShiftSettingsPreview();
+
+  const msg = document.getElementById('shift-settings-saved-msg');
+  if(msg){ msg.style.display='inline'; setTimeout(function(){msg.style.display='none';},3000); }
+  showToast(DB_READY
+    ? '⏱ Shift timings saved and synced to all connected devices'
+    : '⏱ Shift timings saved locally (offline — will not sync to other devices until reconnected)');
+}
+
+async function resetShiftSettingsToDefault(){
+  if(!requirePermission('shift_mgmt')) return;
+  if(!confirm('Reset all shift timings back to the default schedule (06:00-14:00, 14:00-22:00, 22:00-06:00, all enabled)?')) return;
+
+  const defaults = SETTINGS_DEFAULTS.shifts.map(s=>Object.assign({},s));
+  const payload = {setting_key:'shifts', setting_value:JSON.stringify(defaults), updated_at:new Date().toISOString()};
+
+  if(DB_READY){
+    const writeResult = await withTimeout(
+      _sb.from(APP_SETTINGS_TABLE).upsert(payload, {onConflict:'setting_key'}).select(),
+      8000, null
+    );
+    if(!writeResult || writeResult.error){ showSaveFailure(); return; }
+  }
+
+  SETTINGS.shifts = defaults;
+  try{ localStorage.setItem(SETTINGS_KEY, JSON.stringify(SETTINGS)); }catch(e){}
+  logAudit(SESSION?.username||'User','Shift Timings Reset','Restored default shift schedule');
+  loadShiftSettingsUI();
+  updateClock();
+  showToast('↺ Shift timings reset to default'+(DB_READY?' and synced':''));
+}
+
 function loadSettingsPanel(){
   document.getElementById('set-scan-speed').value = SETTINGS.scanSpeedThreshold;
   document.getElementById('set-face-threshold').value = SETTINGS.faceMatchThreshold;
